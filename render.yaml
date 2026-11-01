@@ -14,26 +14,9 @@ services:
     plan: standard
     healthCheckPath: /
     dockerCommand: >-
-      sh -c 'export PLAYWRIGHT_MICROSERVICE_URL="${PLAYWRIGHT_MICROSERVICE_URL:-http://${PLAYWRIGHT_HOSTPORT}/scrape}"
-      NUQ_RABBITMQ_URL="${NUQ_RABBITMQ_URL:-amqp://${RABBITMQ_HOSTPORT}}";
-      node -e "
-      const net = require(\"net\");
-      const wait = (host, port, label) => new Promise((resolve, reject) => {
-      const deadline = Date.now() + 180000;
-      const attempt = () => {
-      const s = net.connect({ host, port: Number(port), timeout: 2000 }, () => { s.destroy(); console.log(label + \" reachable\"); resolve(); });
-      const retry = () => { s.destroy(); Date.now() < deadline ? setTimeout(attempt, 2000) : reject(new Error(label + \" timeout\")); };
-      s.on(\"error\", retry);
-      s.on(\"timeout\", retry);
-      };
-      attempt();
-      });
-      const [rmqHost, rmqPort] = (process.env.RABBITMQ_HOSTPORT || \"localhost:5672\").split(\":\");
-      Promise.all([
-      wait(process.env.POSTGRES_HOST || \"localhost\", process.env.POSTGRES_PORT || 5432, \"nuq-postgres\"),
-      wait(rmqHost, rmqPort || 5672, \"rabbitmq\")
-      ]).catch(err => { console.error(err); process.exit(1); });
-      " && exec node dist/src/harness.js --start-docker'
+      export PLAYWRIGHT_MICROSERVICE_URL="${PLAYWRIGHT_MICROSERVICE_URL:-http://${PLAYWRIGHT_HOSTPORT}/scrape}"
+      NUQ_RABBITMQ_URL="${NUQ_RABBITMQ_URL:-amqp://${RABBITMQ_HOSTPORT}}"
+      && exec node dist/src/harness.js --start-docker
     envVars:
       - fromGroup: firecrawl-shared
       - key: HOST
