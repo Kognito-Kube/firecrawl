@@ -13,10 +13,6 @@ services:
     dockerContext: ./apps/api
     plan: standard
     healthCheckPath: /
-    dockerCommand: >-
-      export PLAYWRIGHT_MICROSERVICE_URL="${PLAYWRIGHT_MICROSERVICE_URL:-http://${PLAYWRIGHT_HOSTPORT}/scrape}"
-      NUQ_RABBITMQ_URL="${NUQ_RABBITMQ_URL:-amqp://${RABBITMQ_HOSTPORT}}"
-      && exec node dist/src/harness.js --start-docker
     envVars:
       - fromGroup: firecrawl-shared
       - key: HOST
