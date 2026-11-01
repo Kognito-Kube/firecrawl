@@ -29,8 +29,12 @@ services:
         value: local
       - key: USE_DB_AUTHENTICATION
         value: "false"
+      - key: NUQ_WORKER_COUNT
+        value: "1"
       - key: NUM_WORKERS_PER_QUEUE
-        value: "8"
+        value: "2"
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=256"
       - key: CRAWL_CONCURRENT_REQUESTS
         value: "10"
       - key: MAX_CONCURRENT_JOBS
