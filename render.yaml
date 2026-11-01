@@ -13,6 +13,10 @@ services:
     dockerContext: ./apps/api
     plan: standard
     healthCheckPath: /
+    buildFilter:
+      paths:
+        - apps/api/**
+        - render.yaml
     envVars:
       - fromGroup: firecrawl-shared
       - key: HOST
@@ -115,6 +119,10 @@ services:
     dockerfilePath: ./apps/playwright-service-ts/Dockerfile
     dockerContext: ./apps/playwright-service-ts
     plan: standard
+    buildFilter:
+      paths:
+        - apps/playwright-service-ts/**
+        - render.yaml
     envVars:
       - key: PORT
         value: "3000"
@@ -141,6 +149,10 @@ services:
     dockerfilePath: ./apps/nuq-postgres/Dockerfile
     dockerContext: ./apps/nuq-postgres
     plan: standard
+    buildFilter:
+      paths:
+        - apps/nuq-postgres/**
+        - render.yaml
     disk:
       name: nuq-postgres-data
       mountPath: /var/lib/postgresql/data
