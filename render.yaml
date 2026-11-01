@@ -1,0 +1,210 @@
+# Render Blueprint for self-hosting the full Firecrawl stack
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. Firecrawl API + Workers (Harness Mode)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: firecrawl-api
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    plan: standard
+    healthCheckPath: /
+    dockerCommand: >-
+      sh -c 'export PLAYWRIGHT_MICROSERVICE_URL="${PLAYWRIGHT_MICROSERVICE_URL:-http://${PLAYWRIGHT_HOSTPORT}/scrape}"
+      NUQ_RABBITMQ_URL="${NUQ_RABBITMQ_URL:-amqp://${RABBITMQ_HOSTPORT}}";
+      node -e "
+      const net = require(\"net\");
+      const wait = (host, port, label) => new Promise((resolve, reject) => {
+      const deadline = Date.now() + 180000;
+      const attempt = () => {
+      const s = net.connect({ host, port: Number(port), timeout: 2000 }, () => { s.destroy(); console.log(label + \" reachable\"); resolve(); });
+      const retry = () => { s.destroy(); Date.now() < deadline ? setTimeout(attempt, 2000) : reject(new Error(label + \" timeout\")); };
+      s.on(\"error\", retry);
+      s.on(\"timeout\", retry);
+      };
+      attempt();
+      });
+      const [rmqHost, rmqPort] = (process.env.RABBITMQ_HOSTPORT || \"localhost:5672\").split(\":\");
+      Promise.all([
+      wait(process.env.POSTGRES_HOST || \"localhost\", process.env.POSTGRES_PORT || 5432, \"nuq-postgres\"),
+      wait(rmqHost, rmqPort || 5672, \"rabbitmq\")
+      ]).catch(err => { console.error(err); process.exit(1); });
+      " && exec node dist/src/harness.js --start-docker'
+    envVars:
+      - fromGroup: firecrawl-shared
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "3002"
+      - key: INTERNAL_PORT
+        value: "3002"
+      - key: EXTRACT_WORKER_PORT
+        value: "3004"
+      - key: WORKER_PORT
+        value: "3005"
+      - key: ENV
+        value: local
+      - key: USE_DB_AUTHENTICATION
+        value: "false"
+      - key: NUM_WORKERS_PER_QUEUE
+        value: "8"
+      - key: CRAWL_CONCURRENT_REQUESTS
+        value: "10"
+      - key: MAX_CONCURRENT_JOBS
+        value: "5"
+      - key: BROWSER_POOL_SIZE
+        value: "5"
+      - key: HARNESS_STARTUP_TIMEOUT_MS
+        value: "120000"
+      - key: LOGGING_LEVEL
+        value: info
+      - key: BULL_AUTH_KEY
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: firecrawl-redis
+          property: connectionString
+      - key: REDIS_RATE_LIMIT_URL
+        fromService:
+          type: keyvalue
+          name: firecrawl-redis
+          property: connectionString
+      - key: POSTGRES_HOST
+        fromService:
+          type: pserv
+          name: firecrawl-nuq-postgres
+          property: host
+      - key: POSTGRES_PORT
+        fromService:
+          type: pserv
+          name: firecrawl-nuq-postgres
+          property: port
+      - key: PLAYWRIGHT_HOSTPORT
+        fromService:
+          type: pserv
+          name: firecrawl-playwright
+          property: hostport
+      - key: RABBITMQ_HOSTPORT
+        fromService:
+          type: pserv
+          name: firecrawl-rabbitmq
+          property: hostport
+      # Optional AI / LLM configuration (set in Render Dashboard if needed)
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: MODEL_NAME
+        sync: false
+      - key: MODEL_EMBEDDING_NAME
+        sync: false
+      - key: OLLAMA_BASE_URL
+        sync: false
+      # Optional Proxy configuration
+      - key: PROXY_SERVER
+        sync: false
+      - key: PROXY_USERNAME
+        sync: false
+      - key: PROXY_PASSWORD
+        sync: false
+      # Optional Search (SearXNG) & Webhook configuration
+      - key: SEARXNG_ENDPOINT
+        sync: false
+      - key: SEARXNG_ENGINES
+        sync: false
+      - key: SEARXNG_CATEGORIES
+        sync: false
+      - key: SELF_HOSTED_WEBHOOK_URL
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # 2. Playwright Browser Rendering Microservice (Private Service)
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: firecrawl-playwright
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./apps/playwright-service-ts/Dockerfile
+    dockerContext: ./apps/playwright-service-ts
+    plan: standard
+    envVars:
+      - key: PORT
+        value: "3000"
+      - key: MAX_CONCURRENT_PAGES
+        value: "10"
+      - key: BLOCK_MEDIA
+        value: "false"
+      - key: ALLOW_LOCAL_WEBHOOKS
+        value: "false"
+      - key: PROXY_SERVER
+        sync: false
+      - key: PROXY_USERNAME
+        sync: false
+      - key: PROXY_PASSWORD
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # 3. NuQ PostgreSQL Queue Database with pg_cron (Private Service)
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: firecrawl-nuq-postgres
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./apps/nuq-postgres/Dockerfile
+    dockerContext: ./apps/nuq-postgres
+    plan: standard
+    disk:
+      name: nuq-postgres-data
+      mountPath: /var/lib/postgresql/data
+      sizeGB: 10
+    envVars:
+      - fromGroup: firecrawl-shared
+      - key: PORT
+        value: "5432"
+      - key: PGDATA
+        value: /var/lib/postgresql/data/pgdata
+
+  # ---------------------------------------------------------------------------
+  # 4. RabbitMQ Broker for NuQ (Private Service)
+  # ---------------------------------------------------------------------------
+  - type: pserv
+    name: firecrawl-rabbitmq
+    runtime: image
+    region: singapore
+    image:
+      url: docker.io/library/rabbitmq:3-management
+    plan: starter
+    disk:
+      name: rabbitmq-data
+      mountPath: /var/lib/rabbitmq
+      sizeGB: 5
+    envVars:
+      - key: PORT
+        value: "5672"
+      - key: RABBITMQ_NODENAME
+        value: "rabbit@localhost"
+
+  # ---------------------------------------------------------------------------
+  # 5. Redis / Render Key Value Store
+  # ---------------------------------------------------------------------------
+  - type: keyvalue
+    name: firecrawl-redis
+    region: singapore
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+envVarGroups:
+  - name: firecrawl-shared
+    envVars:
+      - key: POSTGRES_USER
+        value: postgres
+      - key: POSTGRES_DB
+        value: postgres
+      - key: POSTGRES_PASSWORD
+        generateValue: true
